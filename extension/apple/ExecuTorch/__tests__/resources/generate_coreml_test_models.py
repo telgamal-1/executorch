@@ -22,7 +22,10 @@ tests should run this script once.
 import os
 
 import torch
-
+from executorch.backends.apple.coreml.compiler.coreml_preprocess import (
+    CoreMLBackend,
+    MULTIMETHOD_WEIGHT_SHARING_STRATEGY,
+)
 from executorch.backends.apple.coreml.partition import CoreMLPartitioner
 from executorch.exir import to_edge_transform_and_lower
 from torch import nn
@@ -58,10 +61,18 @@ def main() -> None:
 
     # Two-method model: forward (add) and mul. Both are CoreML-delegated so
     # each has its own per-delegate option set to query at load time.
+    # Disable multi-method weight sharing so the two methods produce
+    # independent CoreML programs
+    multi_method_compile_specs = CoreMLBackend.generate_compile_specs()
+    multi_method_compile_specs.append(
+        CoreMLBackend.generate_multimethod_weight_sharing_strategy_compile_spec(
+            MULTIMETHOD_WEIGHT_SHARING_STRATEGY.DISABLED
+        )
+    )
     ep_mul = torch.export.export(MulModule().eval(), example_inputs)
     add_mul = to_edge_transform_and_lower(
         {"forward": ep_add, "mul": ep_mul},
-        partitioner=[CoreMLPartitioner()],
+        partitioner=[CoreMLPartitioner(compile_specs=multi_method_compile_specs)],
     ).to_executorch()
     _write_pte(add_mul, "add_mul_coreml.pte")
 
