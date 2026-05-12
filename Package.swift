@@ -161,6 +161,11 @@ let testLinkerSettings: [LinkerSetting] = [
   .unsafeFlags([
     "-Xlinker", "-force_load",
     "-Xlinker", "cmake-out/kernels_optimized.xcframework/macos-arm64/libkernels_optimized_macos.a",
+    // CoreML backend registers itself with the global delegate registry via a
+    // static initializer; -force_load ensures that initializer is pulled in so
+    // the CoreML-delegated test fixtures can actually instantiate the backend.
+    "-Xlinker", "-force_load",
+    "-Xlinker", "cmake-out/backend_coreml.xcframework/macos-arm64/libbackend_coreml_macos.a",
   ])
 ]
 
@@ -177,6 +182,7 @@ let package = Package(
       dependencies: [
         .target(name: "executorch\(debug_suffix)"),
         .target(name: "kernels_optimized\(dependencies_suffix)"),
+        .target(name: "backend_coreml\(dependencies_suffix)"),
       ],
       path: "extension/apple/ExecuTorch/__tests__",
       exclude: ["ObjC", "resources/generate_coreml_test_models.py", "resources/.gitignore"],
@@ -188,6 +194,7 @@ let package = Package(
       dependencies: [
         .target(name: "executorch\(debug_suffix)"),
         .target(name: "kernels_optimized\(dependencies_suffix)"),
+        .target(name: "backend_coreml\(dependencies_suffix)"),
       ],
       path: "extension/apple/ExecuTorch/__tests__/ObjC",
       exclude: [".gitignore"],
