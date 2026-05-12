@@ -10,9 +10,13 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
+#include <memory>
+#include <vector>
 
 #include <executorch/extension/llm/runner/stats.h>
 #include <executorch/extension/llm/runner/text_decoder_runner.h>
+#include <executorch/extension/llm/sampler/logit_processor.h>
 #include <executorch/extension/tensor/tensor.h>
 #include <pytorch/tokenizers/tokenizer.h>
 
@@ -36,6 +40,21 @@ class ET_EXPERIMENTAL TextTokenGenerator {
 
   void set_ignore_eos(bool ignore_eos) {
     ignore_eos_ = ignore_eos;
+  }
+
+  // Not safe to call while generate() is running on another thread.
+  void add_logit_processor(std::shared_ptr<LogitProcessor> processor) {
+    if (processor) {
+      logit_processors_.push_back(std::move(processor));
+    }
+  }
+
+  void clear_logit_processors() {
+    logit_processors_.clear();
+  }
+
+  size_t num_logit_processors() const {
+    return logit_processors_.size();
   }
 
   virtual ~TextTokenGenerator() = default;
@@ -109,6 +128,10 @@ class ET_EXPERIMENTAL TextTokenGenerator {
 
       prev_token = cur_token;
 
+      if (!logit_processors_.empty()) {
+        ET_CHECK_OK_OR_RETURN_ERROR(apply_logit_processors_(logits_tensor));
+      }
+
       stats_->on_sampling_begin();
       cur_token =
           text_decoder_runner_->logits_to_token(logits_tensor, temperature);
@@ -177,6 +200,40 @@ class ET_EXPERIMENTAL TextTokenGenerator {
   }
 
  private:
+  inline ::executorch::runtime::Error apply_logit_processors_(
+      ::executorch::aten::Tensor& logits_tensor) {
+    ET_CHECK_OR_RETURN_ERROR(
+        logits_tensor.dim() >= 2,
+        InvalidArgument,
+        "LogitProcessor expects logits with dim >= 2, got %d",
+        static_cast<int>(logits_tensor.dim()));
+    ET_CHECK_OR_RETURN_ERROR(
+        logits_tensor.scalar_type() == ::executorch::aten::ScalarType::Float,
+        InvalidArgument,
+        "LogitProcessor chain only supports Float logits; got dtype %d",
+        static_cast<int>(logits_tensor.scalar_type()));
+
+    auto* logits = logits_tensor.mutable_data_ptr<float>();
+    const ssize_t vocab_size = logits_tensor.size(logits_tensor.dim() - 1);
+    ET_CHECK_OR_RETURN_ERROR(
+        vocab_size > 0 && vocab_size <= std::numeric_limits<int32_t>::max(),
+        InvalidArgument,
+        "vocab_size %zd out of range for LogitProcessor",
+        vocab_size);
+    if (logits_tensor.dim() == 3) {
+      const ssize_t num_tokens = logits_tensor.size(1);
+      ET_CHECK_OR_RETURN_ERROR(
+          num_tokens > 0,
+          InvalidArgument,
+          "LogitProcessor expects non-empty sequence dimension");
+      logits += (num_tokens - 1) * vocab_size;
+    }
+    for (auto& processor : logit_processors_) {
+      processor->process(logits, static_cast<int32_t>(vocab_size));
+    }
+    return ::executorch::runtime::Error::Ok;
+  }
+
   /**
    * Note: TextTokenGenerator does not own the tokenizer_ and
    * text_decoder_runner_. The lifecycle of these objects should be managed
@@ -188,6 +245,8 @@ class ET_EXPERIMENTAL TextTokenGenerator {
   std::unique_ptr<std::unordered_set<uint64_t>> eos_ids_;
   bool use_kv_cache_;
   bool ignore_eos_ = false;
+
+  std::vector<std::shared_ptr<LogitProcessor>> logit_processors_;
 
   // state machine
   std::atomic<bool> should_stop_{false};

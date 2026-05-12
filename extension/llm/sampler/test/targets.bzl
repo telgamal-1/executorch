@@ -22,3 +22,13 @@ def define_common_targets():
             "//caffe2:torch-cpp",
         ],
     )
+
+    runtime.cxx_test(
+        name = "test_logit_processor",
+        srcs = [
+            "test_logit_processor.cpp",
+        ],
+        deps = [
+            "//executorch/extension/llm/sampler:sampler",
+        ],
+    )
