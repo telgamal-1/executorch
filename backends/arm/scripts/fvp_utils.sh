@@ -58,6 +58,11 @@ else
 fi
 
 function install_fvp() {
+    if [[ "${OS}" != "Linux" ]]; then
+        log_step "fvp" "Skipping bundled FVP install on ${OS}; use a host-installed FVP instead"
+        return 0
+    fi
+
     # Download and install Corstone FVP simulator platforms.
     fvps=("corstone300" "corstone320" "corstone1000")
 
@@ -115,18 +120,52 @@ function check_fvp_eula () {
 
 function setup_fvp() {
     if [[ "${OS}" != "Linux" ]]; then
-        # Check if FVP is callable
-        if command -v FVP_Corstone_SSE-300_Ethos-U55 &> /dev/null; then
-            log_step "fvp" "Detected pre-installed MacOS FVP binaries; continuing"
-            return 0  # If true exit gracefully and proceed with setup
-        else
-            log_step "fvp" "Warning: FVP setup only supported on Linux; Mac users should install via https://github.com/Arm-Examples/FVPs-on-Mac and ensure binaries are on PATH"
-            return 1  # Throw error. User need to install FVP according to ^^^
+        local repo_wrapper_dir="${et_dir}/FVPs-on-Mac/bin"
+        local candidates=("FVP_Corstone_SSE-300_Ethos-U55" "FVP_Corstone_SSE-320")
+        local candidate=""
+        local candidate_path=""
+        local bundled_linux_fvp=""
+
+        if [[ -x "${repo_wrapper_dir}/FVP_Corstone_SSE-300_Ethos-U55" ]] \
+            || [[ -x "${repo_wrapper_dir}/FVP_Corstone_SSE-320" ]]; then
+            log_step "fvp" "Detected repo-local ${OS} FVP wrapper at ${repo_wrapper_dir}; continuing"
+            return 0
         fi
+
+        for candidate in "${candidates[@]}"; do
+            candidate_path="$(command -v "${candidate}" 2>/dev/null || true)"
+            [[ -z "${candidate_path}" ]] && continue
+            candidate_path="$(realpath "${candidate_path}")"
+
+            if [[ "${candidate_path}" == "${root_dir}"/FVP-* ]]; then
+                bundled_linux_fvp="${candidate_path}"
+                continue
+            fi
+
+            log_step "fvp" "Detected host-installed ${OS} FVP binary at ${candidate_path}; continuing"
+            return 0
+        done
+
+        if [[ -n "${bundled_linux_fvp}" ]]; then
+            log_step "fvp" "Detected bundled Linux FVP binary at ${bundled_linux_fvp}; it cannot run on ${OS}"
+            log_step "fvp" "Install the macOS FVP build via https://github.com/Arm-Examples/FVPs-on-Mac and ensure binaries are on PATH"
+            return 1
+        fi
+
+        log_step "fvp" "Warning: FVP setup only supports bundled installs on Linux; Mac users should install via https://github.com/Arm-Examples/FVPs-on-Mac and ensure binaries are on PATH"
+        return 1
     fi
 }
 
 function setup_path_fvp() {
+    if [[ "${OS}" != "Linux" ]]; then
+        local repo_wrapper_dir="${et_dir}/FVPs-on-Mac/bin"
+        if [[ -d "${repo_wrapper_dir}" ]]; then
+            prepend_env_in_setup_path PATH "${repo_wrapper_dir}"
+        fi
+        return 0
+    fi
+
     fvps=("corstone300" "corstone320" "corstone1000")
     for fvp in "${fvps[@]}"; do
         model_dir_variable=${fvp}_model_dir
