@@ -143,8 +143,8 @@ if FileManager.default.fileExists(atPath: "\(testResourcesDir)/add_mul_coreml.pt
 }
 
 // SwiftPM resources must live under the target's path, so the ObjC test
-// target uses symlinks to the canonical resources directory. The symlinks
-// themselves are gitignored and (re)created by scripts/build_apple_frameworks.sh.
+// target uses copies of the canonical resources directory's fixtures. The
+// copies themselves are gitignored and (re)created by scripts/build_apple_frameworks.sh.
 let objcTestsDir = "extension/apple/ExecuTorch/__tests__/ObjC"
 var objcTestResources: [Resource] = []
 if FileManager.default.fileExists(atPath: "\(objcTestsDir)/add.pte") {
